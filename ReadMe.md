@@ -39,6 +39,9 @@ You require the following python libraries to run this code::
 	matplotlib
 	topas2numpy (only relevant if you plan to read in topas data)
  
+## Liability
 
+This seems to work properly, but no promises! See license file for exact terms of use.
+If you do find errors please fix and push back or get in touch.
 
    
