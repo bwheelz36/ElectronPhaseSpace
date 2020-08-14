@@ -9,12 +9,15 @@ The purpose of this code is to provide a tool to read electron phase spaces in p
 
 Input Data can at present be one of four kinds::
 
-Data can be one of three formats:
-1. CST trk particle monitor
+Data can be one of four formats:
+
+1. topas ASCII phase space
 2. Data from SLAC
+3. CST trk particle monitor
 3. Numpy array
 
-For the third case, the data should be
+For a numpy array, the data should be
+
 [x y z px py pz]
 x y z in in mm
 px py pz  in [MeV/c]
@@ -27,7 +30,6 @@ px py pz  in [MeV/c]
 A basic example of use is provided with 
 ElectronPhaseSpaceExample.py
 
-	
 ## Requirements
 
 You require the following python libraries to run this code::
