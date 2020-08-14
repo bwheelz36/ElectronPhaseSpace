@@ -204,12 +204,18 @@ class ElectronPhaseSpace:
         Read mnumpy array of the form
         [x y z px py pz]
         """
-        self.x = self.DataLoc[:, 0]
-        self.y = self.DataLoc[:, 1]
-        self.z = self.DataLoc[:, 2]
-        self.px = self.DataLoc[:, 3]
-        self.py = self.DataLoc[:, 4]
-        self.pz = self.DataLoc[:, 5]
+        self.x = self.Data[:, 0]
+        self.y = self.Data[:, 1]
+        self.z = self.Data[:, 2]
+        self.px = self.Data[:, 3]
+        self.py = self.Data[:, 4]
+        self.pz = self.Data[:, 5]
+
+        # calculate energies
+        Totm = np.sqrt((self.px ** 2 + self.py ** 2 + self.pz ** 2))
+        self.TOT_E = np.sqrt(Totm ** 2 + self.me_MeV ** 2)
+        Kin_E = np.subtract(self.TOT_E, self.me_MeV)
+        self.E = Kin_E
 
     def __AnalyseEnergyDistribution(self):
         self.meanEnergy = np.mean(self.E)
@@ -407,13 +413,13 @@ class ElectronPhaseSpace:
         plt.ylabel("X' [mrad]")
 
         # # add in the phase elipse
-        xq = np.linspace(-2, 2, 1000)
+        xq = np.linspace(min(self.x), max(self.x), 1000)
         xpq = np.linspace(min(self.xp), max(self.xp), 1000)
         [ElipseGridx, ElipseGridy] = np.meshgrid(xq, xpq)
         EmittanceGrid = (self.gamma * np.square(ElipseGridx)) + \
                         (2 * self.alpha * np.multiply(ElipseGridx, ElipseGridy)) + \
                         (self.beta * np.square(ElipseGridy))
-        tol = .02 * self.epsilon
+        tol = .01 * self.epsilon
         Elipse = (EmittanceGrid >= self.epsilon - tol) & (EmittanceGrid <= self.epsilon + tol)
         ElipseIndex = np.where(Elipse == True)
         elipseX = ElipseGridx[ElipseIndex]
@@ -433,27 +439,6 @@ class ElectronPhaseSpace:
         plt.xlabel('Energy [Mev]')
         plt.ylabel('N counts')
         plt.title('Energy histogram')
-
-    def PlotAngularSpread(self):
-        plt.figure()
-        plt.hist(self.xp, bins=100)
-        plt.title('histogram of angles')
-        plt.xlabel('angle [mrad]')
-        plt.ylabel('N counts')
-        plt.show()
-
-    def PlotRadialDependency(self):
-        fig, axs = plt.subplots(1, 2)
-        axs[0].hist(self.y, bins=100)
-        axs[1].hist(self.x, bins=100)
-
-        axs[0].set_xlabel('Radial particle position [mm]')
-        axs[0].set_ylabel('N counts')
-        axs[0].title.set_text('position distribution X')
-
-        axs[1].set_xlabel('Radial particle position [mm]')
-        axs[1].set_ylabel('N counts')
-        axs[1].title.set_text('position distribution Y')
 
     def PlotParticlePositions(self):
 
