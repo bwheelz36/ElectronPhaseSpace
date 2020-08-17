@@ -7,8 +7,6 @@ Brendan Whelan
 
 The purpose of this code is to provide a tool to read electron phase spaces in python, perform some basic analysis, and - if needed, convert them to an output format appropriate to read into either CST or topas.
 
-Input Data can at present be one of four kinds::
-
 Data can be one of four formats:
 
 1. topas ASCII phase space
