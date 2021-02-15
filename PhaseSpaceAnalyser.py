@@ -176,7 +176,7 @@ class ElectronPhaseSpace:
 
         self.x = PhaseSpace['Position X [cm]'][Ind] * 1e1
         self.y = PhaseSpace['Position Y [cm]'][Ind] * 1e1
-        self.z = PhaseSpace['Position Y [cm]'][Ind] * 1e1
+        self.z = PhaseSpace['Position Z [cm]'][Ind] * 1e1
         DirCosineX = PhaseSpace['Direction Cosine X'][Ind]
         DirCosineY = PhaseSpace['Direction Cosine Y'][Ind]
         self.E = PhaseSpace['Energy [MeV]'][Ind]
