@@ -9,7 +9,7 @@ The purpose of this code is to provide a tool to read electron phase spaces in p
 
 Data can be one of four formats:
 
-1. topas ASCII phase space
+1. topas phase space
 2. Data from SLAC
 3. CST trk particle monitor
 3. Numpy array
