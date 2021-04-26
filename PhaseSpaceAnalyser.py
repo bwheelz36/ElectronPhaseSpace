@@ -250,12 +250,12 @@ class ElectronPhaseSpace:
         self.x = Data[:, 0]
         self.y = Data[:, 1]
         self.z = Data[:, 2]
-        self.px = Data[:, 9]
-        self.py = Data[:, 10]
-        self.pz = Data[:, 11]
+        self.px = Data[:, 9] * self.me_MeV
+        self.py = Data[:, 10] * self.me_MeV
+        self.pz = Data[:, 11] * self.me_MeV
 
         # calculate energies
-        Totm = np.sqrt((self.px ** 2 + self.py ** 2 + self.pz ** 2)) * self.me_MeV
+        Totm = np.sqrt((self.px ** 2 + self.py ** 2 + self.pz ** 2))
         self.TOT_E = np.sqrt(Totm ** 2 + self.me_MeV ** 2)
         Kin_E = np.subtract(self.TOT_E, self.me_MeV)
         self.E = Kin_E
@@ -381,72 +381,34 @@ class ElectronPhaseSpace:
         if Rvals is None:
             # pick a default
             Rvals = np.linspace(0, 2, 21)
-        try:
-            r = np.sqrt(self.x ** 2 + self.y ** 2)
-            numparticles = self.x.shape[0]
-            rad_prop = []
 
+        r = np.sqrt(self.x ** 2 + self.y ** 2)
+        numparticles = self.x.shape[0]
+        rad_prop = []
 
-            if self.verbose:
-                if self.ROI == None:
-                    print(f'Assessing particle density versus R for all particles')
-                else:
-                    print(f'Assessing particle density versus R for particles projected to be within a radius of'
-                          f' {self.ROI[1]} at a distance of {self.ROI[0]}')
+        if self.verbose:
+            if self.ROI == None:
+                print(f'Assessing particle density versus R for all particles')
+            else:
+                print(f'Assessing particle density versus R for particles projected to be within a radius of'
+                      f' {self.ROI[1]} at a distance of {self.ROI[0]}')
 
-            for rcheck in Rvals:
-                if self.ROI == None:
-                    Rind = r <= rcheck
-                    rad_prop.append(np.count_nonzero(Rind) * 100 / numparticles)
-                else:
-                    # apply the additional ROI filter by projecting x,y to the relevant z position
-                    Xproj = np.multiply(self.ROI[0], np.divide(self.px, self.pz)) + self.x
-                    Yproj = np.multiply(self.ROI[0], np.divide(self.py, self.pz)) + self.y
-                    Rproj = np.sqrt(Xproj ** 2 + Yproj ** 2)
-                    ROIind = Rproj <= self.ROI[1]
+        for rcheck in Rvals:
+            if self.ROI == None:
+                Rind = r <= rcheck
+                rad_prop.append(np.count_nonzero(Rind) * 100 / numparticles)
+            else:
+                # apply the additional ROI filter by projecting x,y to the relevant z position
+                Xproj = np.multiply(self.ROI[0], np.divide(self.px, self.pz)) + self.x
+                Yproj = np.multiply(self.ROI[0], np.divide(self.py, self.pz)) + self.y
+                Rproj = np.sqrt(Xproj ** 2 + Yproj ** 2)
+                ROIind = Rproj <= self.ROI[1]
 
-                    Rind = r <= rcheck
-                    ind = np.multiply(ROIind, Rind)
-                    rad_prop.append(np.count_nonzero(ind) * 100 / numparticles)
+                Rind = r <= rcheck
+                ind = np.multiply(ROIind, Rind)
+                rad_prop.append(np.count_nonzero(ind) * 100 / numparticles)
 
-            self.rad_prop = rad_prop
-        except:
-            print('lets debug, let debuggggg')
-
-    def AssessDensityVersusR_temp(self):
-        """
-        THis is the same as above, but doesn't filter the particles by their position at the target, but only
-        by where they are going....
-        as implied by the name, this is encisioned as a temporary fuction.
-        """
-        try:
-            r = np.sqrt(self.x ** 2 + self.y ** 2)
-            numparticles = self.x.shape[0]
-            rad_prop = []
-            Rvals = np.linspace(0, 5, 21)
-
-            if self.verbose:
-                if self.ROI == None:
-                    print(f'Assessing particle density versus R for all particles')
-                else:
-                    print(f'Assessing particle density versus R for particles projected to be within a radius of'
-                          f' {self.ROI[1]} at a distance of {self.ROI[0]}')
-
-            for rcheck in Rvals:
-                if self.ROI == None:
-                    Rind = r <= rcheck
-                    rad_prop.append(np.count_nonzero(Rind) * 100 / numparticles)
-                else:
-                    # apply the additional ROI filter by projecting x,y to the relevant z position
-                    Xproj = np.multiply(self.ROI[0], np.divide(self.px, self.pz)) + self.x
-                    Yproj = np.multiply(self.ROI[0], np.divide(self.py, self.pz)) + self.y
-                    Rproj = np.sqrt(Xproj ** 2 + Yproj ** 2)
-                    ROIind = Rproj <= rcheck
-                    rad_prop.append(np.count_nonzero(ROIind) * 100 / numparticles)
-
-            self.rad_prop = rad_prop
-        except:
-            print('lets debug, let debuggggg')
+        self.rad_prop = rad_prop
 
     def __CalculateTwissParameters(self):
         """
@@ -524,9 +486,9 @@ class ElectronPhaseSpace:
             self.zOut = self.z * 1e-3
         else:
             self.zOut = (self.z + Zoffset) * 1e-3
-        px = np.multiply(self.BetaX, self.GammaX)
-        py = np.multiply(self.BetaY, self.GammaY)
-        pz = np.multiply(self.BetaZ, self.GammaZ)
+        px = self.px/self.me_MeV
+        py = self.py/self.me_MeV
+        pz = self.pz/self.me_MeV
         # generate PID file
         Data = [x[0:NparticlesToWrite], y[0:NparticlesToWrite], self.zOut[0:NparticlesToWrite],
                 px[0:NparticlesToWrite], py[0:NparticlesToWrite], pz[0:NparticlesToWrite],
@@ -582,6 +544,8 @@ class ElectronPhaseSpace:
 
         U (direction cosine of momentum with respect to X)
         V (direction cosine of momentum with respect to Y)
+
+        nb: using velocity or momentum seem to give the same results
 
         """
         V = np.sqrt(self.px ** 2 + self.py ** 2 + self.pz ** 2)
