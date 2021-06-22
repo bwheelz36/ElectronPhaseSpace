@@ -40,6 +40,6 @@ You require the following python libraries to run this code::
 ## Liability
 
 This seems to work properly, but no promises! See license file for exact terms of use.
-If you do find errors please fix and push back or get in touch.
+If you do find errors please fix and pull request or add an issue.
 
    
