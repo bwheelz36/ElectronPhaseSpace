@@ -109,7 +109,7 @@ class ElectronPhaseSpace:
         self.verbose = verbose
         self.WeightScatterPlots = False  # weights plots by density. Looks better but is slow.
         self.FigureSpecs = FigureSpecs()
-        self.ROI = [700, 5]
+        self.ROI = None #[700, 5]
         '''
         '^^ this is used when asessing number of particles in a certain radius.
         If the particle is projected to fall within the ROI at ROI[0]=z and ROI[1] =r, it is counted.
