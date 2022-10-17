@@ -103,7 +103,6 @@ class ElectronPhaseSpace:
         and px py pz  in [MeV/c]
         """
         self.Data = Data
-        self.MakePlots = False  # there are some phase space plots included but they are not very robust
         self.ParticleType = 'electrons'
         self.me_MeV = 0.511  # electron mass in MeV
         self.c = 2.998e8  # speed of light in m/s
@@ -133,11 +132,7 @@ class ElectronPhaseSpace:
 
         if self.verbose == True:
             self.PrintData()
-        if self.MakePlots:
-            self.PlotPhaseSpaceX()
-            self.PlotEnergyHistogram()
-            self.PlotAngularSpread()
-            self.PlotRadialDependency()
+
 
     def PrintData(self):
         """
@@ -179,11 +174,13 @@ class ElectronPhaseSpace:
                     FirstLine = f.readline()
                 CSTfirstLinePattern = '%  ASCII export :'
                 SLACfirstLinePattern = 'Phase space'
-
+                tibarayFirstLinePattern = 'x y z rxy Bx By Bz G t m q nmacro rmacro ID'
                 if FirstLine.find(SLACfirstLinePattern) >= 0:
                     self.DataType = "SLAC"
                 elif FirstLine.find(CSTfirstLinePattern) >= 0:
                     self.DataType = "CST"
+                elif FirstLine.find(tibarayFirstLinePattern) >= 0:
+                    self.DataType = 'tibaray'
                 else:
                     sys.exit('unable to determine data type')
         else:
@@ -213,6 +210,35 @@ class ElectronPhaseSpace:
             self.OutputDataLoc, Filename = os.path.split(self.Data)
             self.OutputFile, Filetype = os.path.splitext(Filename)
             self.__ReadInTopasData()
+        elif self.DataType == 'tibaray':
+            self.OutputDataLoc, Filename = os.path.split(self.Data)
+            self.OutputFile, Filetype = os.path.splitext(Filename)
+            self.__ReadIntibarayData()
+
+    def __ReadIntibarayData(self):
+        """
+
+        x y z rxy Bx By Bz G t m q nmacro rmacro ID
+
+        Bx and Bz seem to be identical
+        """
+
+        Data = np.loadtxt(self.Data, skiprows=1)
+        self.x = Data[:, 0]
+        self.y = Data[:, 1]
+        self.z = Data[:, 2]
+        Bx = Data[:, 3]
+        By = Data[:, 4]
+        Bz = Data[:, 5]
+        G = Data[:, 6]
+        t = Data[:, 7]
+        m = Data[:, 8]
+        q = Data[:, 9]
+        nmacro = Data[:, 10]
+        rmacro = Data[:, 11]
+        ID = Data[:, 12]
+
+        print('glo')
 
     def __ReadInSLACData(self):
         """
