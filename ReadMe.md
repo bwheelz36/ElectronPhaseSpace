@@ -35,7 +35,13 @@ You require the following python libraries to run this code::
 	numpy
 	scipy
 	matplotlib
-	topas2numpy (only relevant if you plan to read in topas data)
+	topas2numpy
+	
+These can be installed by doing
+
+```
+pip install -r requirements.txt
+```
  
 ## Liability
 
