@@ -28,7 +28,7 @@ px py pz  in [MeV/c]
 Basic example below:
 
 ```python
-mport os,sys
+import os,sys
 import numpy as np
 sys.path.append('.')  # make sure python knows to look in the current folder
 from PhaseSpaceAnalyser import ElectronPhaseSpace
