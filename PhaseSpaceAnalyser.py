@@ -7,6 +7,7 @@ import os, sys
 import glob
 import logging
 logging.basicConfig(level=logging.WARNING)
+import warnings
 import matplotlib.patches as patches
 from scipy.stats import gaussian_kde
 import re
@@ -88,7 +89,7 @@ class ElectronPhaseSpace:
         PS.PlotPhaseSpaceX()
     """
 
-    def __init__(self, Data, verbose=False):
+    def __init__(self, Data, verbose=False, weight_position_plot=False):
         """
         Data can be one of four things:
 
@@ -107,7 +108,7 @@ class ElectronPhaseSpace:
         self.me_MeV = 0.511  # electron mass in MeV
         self.c = 2.998e8  # speed of light in m/s
         self.verbose = verbose
-        self.WeightScatterPlots = False  # weights plots by density. Looks better but is slow.
+        self._weight_position_plot = weight_position_plot  # weights plots by density. Looks better but is slow.
         self.FigureSpecs = FigureSpecs()
         self.ROI = [700, 5]
         '''
@@ -141,8 +142,8 @@ class ElectronPhaseSpace:
         if (self.DataType == 'topas') or (self.DataType == 'SLAC') or (self.DataType == 'CST'):
             Filepath, filename = os.path.split(self.Data)
             print(f'\nFor file: {filename}')
-        print(f'\u03C0\u03B5: {self.epsilon: 1.1f} mm mrad, \u03B1: {self.alpha: 1.1f}, \u0392: {self.beta: 1.1f}, '
-              f'\u03B3: {self.gamma: 1.1f}')
+        print(f'\u03C0\u03B5: {self.twiss_epsilon: 1.1f} mm mrad, \u03B1: {self.twiss_alpha: 1.1f}, \u0392: {self.twiss_beta: 1.1f}, '
+              f'\u03B3: {self.twiss_gamma: 1.1f}')
         print(f'Median energy: {self.medianEnergy: 1.1f} MeV \u00B1 {self.EnergySpreadIQR} (IQR) ')
         print(f'Mean Z position of input data is {np.mean(self.z): 3.1f} \u00B1 {np.std(self.z): 1.1f} (std)')
         medianEnergy = np.median(self.E)
@@ -213,32 +214,38 @@ class ElectronPhaseSpace:
         elif self.DataType == 'tibaray':
             self.OutputDataLoc, Filename = os.path.split(self.Data)
             self.OutputFile, Filetype = os.path.splitext(Filename)
-            self.__ReadIntibarayData()
+            self.__ReadInTibarayData()
 
-    def __ReadIntibarayData(self):
+    def __ReadInTibarayData(self):
         """
+        Read in data from tibaray, which had header:
 
-        x y z rxy Bx By Bz G t m q nmacro rmacro ID
-
-        Bx and Bz seem to be identical
+        `x y z rxy Bx By Bz G t m q nmacro rmacro ID`
         """
-
+        warnings.warn('Read in of this file format is still under development')
         Data = np.loadtxt(self.Data, skiprows=1)
-        self.x = Data[:, 0]
-        self.y = Data[:, 1]
-        self.z = Data[:, 2]
-        Bx = Data[:, 3]
-        By = Data[:, 4]
-        Bz = Data[:, 5]
-        G = Data[:, 6]
-        t = Data[:, 7]
-        m = Data[:, 8]
-        q = Data[:, 9]
-        nmacro = Data[:, 10]
-        rmacro = Data[:, 11]
-        ID = Data[:, 12]
+        self.x = Data[:, 0] * 1e3  #mm to m
+        self.y = Data[:, 1] * 1e3
+        self.z = Data[:, 2] * 1e3
+        Bx = Data[:, 4]
+        By = Data[:, 5]
+        Bz = Data[:, 6]
+        Gamma = Data[:, 7]
+        t = Data[:, 8]
+        m = Data[:, 9]
+        q = Data[:, 10]
+        nmacro = Data[:, 11]
+        rmacro = Data[:, 12]
+        ID = Data[:, 13]
 
-        print('glo')
+        self.px = np.multiply(Bx, Gamma) * self.me_MeV
+        self.py = np.multiply(By, Gamma) * self.me_MeV
+        self.pz = np.multiply(Bz, Gamma) * self.me_MeV
+
+        Totm = np.sqrt((self.px ** 2 + self.py ** 2 + self.pz ** 2))
+        self.TOT_E = np.sqrt(Totm ** 2 + self.me_MeV ** 2)
+        Kin_E = np.subtract(self.TOT_E, self.me_MeV)
+        self.E = Kin_E
 
     def __ReadInSLACData(self):
         """
@@ -696,9 +703,7 @@ class ElectronPhaseSpace:
             self.fig, self.axs = plt.subplots(1, 2)
             self.fig.set_size_inches(10, 5)
 
-        if self.WeightScatterPlots:
-
-
+        if self._weight_position_plot:
             xy = np.vstack([self.x, self.y])
             z = gaussian_kde(xy)(xy)
             z = z / max(z)
