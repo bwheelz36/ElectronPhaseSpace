@@ -629,6 +629,10 @@ class ElectronPhaseSpace:
         :type Zoffset: None or double
         """
         print('generating topas data file')
+        import platform
+        if 'windows' in platform.system().lower():
+            warnings.warn('to generate a file that topas will accept, you need to do this from linux. I think'
+                          'its the line endings.')
         WritefilePath = self.OutputDataLoc + '/' + self.OutputFile + '_tpsImport.phsp'
 
         # write the header file:
@@ -868,8 +872,8 @@ class ElectronPhaseSpace:
         print(
             f'\u03C0\u03B5: {self.twiss_epsilon: 1.1f} mm mrad, \u03B1: {self.twiss_alpha: 1.1f}, \u0392: {self.twiss_beta: 1.1f}, '
             f'\u03B3: {self.twiss_gamma: 1.1f}')
-        print(f'Median energy: {self.medianEnergy: 1.1f} MeV \u00B1 {self.EnergySpreadIQR} (IQR) ')
-        print(f'Mean energy: {self.meanEnergy: 1.1f} MeV \u00B1 {self.stdEnergy} (std) ')
+        print(f'Median energy: {self.medianEnergy: 1.2f} MeV \u00B1 {self.EnergySpreadIQR: 1.2f} (IQR) ')
+        print(f'Mean energy: {self.meanEnergy: 1.2f} MeV \u00B1 {self.stdEnergy: 1.2f} (std) ')
         _mean_z, _std_z = self.__weighted_avg_and_std(self.z, self.weight)
         print(f'Mean Z position of input data is {_mean_z: 3.1f} mm \u00B1 {_std_z: 1.1f} (std)')
         medianEnergy = self.medianEnergy
