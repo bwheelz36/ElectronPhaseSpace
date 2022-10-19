@@ -22,12 +22,9 @@ px py pz  in [MeV/c]
 Basic example below:
 
 ```python
-import os,sys
 import numpy as np
-sys.path.append('.')  # make sure python knows to look in the current folder
-from PhaseSpaceAnalyser import ElectronPhaseSpace
-
-## please see https://github.com/bwheelz36/ElectronPhaseSpace for allowable data imports:
+from ElectronPhaseSpace import ElectronPhaseSpace
+# ^ this import statement assumes you have cloned this repo into the same directory as this script
 
 # Random numpy data
 # -----------------
@@ -40,7 +37,8 @@ z = np.ones(Nparticles) * 100  # let's say z = 100 mm for arguments sake
 px = x * .01 + np.random.randn(Nparticles) * .01 # transverse momentum with some noise (MeV)
 py = y * .01 + np.random.randn(Nparticles) * .01 # + np.random.rand(Nparticles) * .001 # transverse momentum with some noise (MeV)
 pz = np.ones(Nparticles) * 11 + np.random.randn(Nparticles) * .1 # primary beam direction
-Data = np.vstack((x, y, z, px, py, pz))
+weight = np.ones(Nparticles) # all particles weighted equally
+Data = np.vstack((x, y, z, px, py, pz, weight))
 Data = np.transpose(Data)
 
 # Read in SLAC/CST/Topas data:

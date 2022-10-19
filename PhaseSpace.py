@@ -1,21 +1,24 @@
-# PhaseSpaceAnalyser.py
+# PhaseSpace.py
 import numpy as np
+import scipy.constants
 from matplotlib import pyplot as plt
 from scipy import constants
 from scipy.stats import norm
 import os, sys
 import glob
 import logging
+
 logging.basicConfig(level=logging.WARNING)
 import warnings
 import matplotlib.patches as patches
 from scipy.stats import gaussian_kde
+from scipy import constants
+from time import perf_counter
 import re
+
 sys.path.append(os.path.abspath("../PhaserGeometry"))
-try:
-    import topas2numpy as tp
-except ImportError:
-    print('unable to import topas2numpy, which is necessary to read in topas data files')
+import topas2numpy as tp
+
 
 class FigureSpecs:
     """
@@ -26,6 +29,7 @@ class FigureSpecs:
     TitleFontSize = 16
     Font = 'serif'
     AxisFontSize = 14
+
 
 class ElectronPhaseSpace:
     """
@@ -95,22 +99,25 @@ class ElectronPhaseSpace:
 
         1. CST trk particle monitor
         2. Data from SLAC
-        3. Topas ASCII phase space (read in with topas2numpy)
-        4. Numpy array
+        3. Topas ASCII phase space
+        4. Data from tibaray
+        5. Numpy array
 
         For the third case, the data should be
-        [x y z px py pz]
-        with x y z in in mm
+        [x y z px py pz weight]
+        with x y z in mm
         and px py pz  in [MeV/c]
+
         """
         self.Data = Data
         self.ParticleType = 'electrons'
-        self.me_MeV = 0.511  # electron mass in MeV
-        self.c = 2.998e8  # speed of light in m/s
+        self._me_MeV = 0.511  # electron mass in MeV
+        self._c = 2.998e8  # speed of light in m/s
+        self.weight = None  # relative weight of each particle; overwritten with ones if not set during read in
         self.verbose = verbose
         self._weight_position_plot = weight_position_plot  # weights plots by density. Looks better but is slow.
         self.FigureSpecs = FigureSpecs()
-        self.ROI = None #[700, 5]
+        self.ROI = None  # [700, 5]
         '''
         '^^ this is used when asessing number of particles in a certain radius.
         If the particle is projected to fall within the ROI at ROI[0]=z and ROI[1] =r, it is counted.
@@ -120,7 +127,7 @@ class ElectronPhaseSpace:
         plt.rc('xtick', labelsize=self.FigureSpecs.AxisFontSize)
         plt.rc('ytick', labelsize=self.FigureSpecs.AxisFontSize)
 
-        # we will trey to figure out what data is being put in.
+        # we will try to figure out what data is being put in.
         # this function will probably require some updates to work with different data formats
         self.__DetectDataType()
         self.__ReadInData()
@@ -133,28 +140,6 @@ class ElectronPhaseSpace:
 
         if self.verbose == True:
             self.PrintData()
-
-
-    def PrintData(self):
-        """
-        can be used to print info to the termainl
-        """
-        if (self.DataType == 'topas') or (self.DataType == 'SLAC') or (self.DataType == 'CST'):
-            Filepath, filename = os.path.split(self.Data)
-            print(f'\nFor file: {filename}')
-        print(f'\u03C0\u03B5: {self.twiss_epsilon: 1.1f} mm mrad, \u03B1: {self.twiss_alpha: 1.1f}, \u0392: {self.twiss_beta: 1.1f}, '
-              f'\u03B3: {self.twiss_gamma: 1.1f}')
-        print(f'Median energy: {self.medianEnergy: 1.1f} MeV \u00B1 {self.EnergySpreadIQR} (IQR) ')
-        print(f'Mean Z position of input data is {np.mean(self.z): 3.1f} \u00B1 {np.std(self.z): 1.1f} (std)')
-        medianEnergy = np.median(self.E)
-        CutOff = .05
-        ind = self.E > (medianEnergy - (.05 * medianEnergy))
-        print(
-            f'{np.count_nonzero(ind) * 100 / ind.shape[0]:1.1f} of {self.ParticleType} are within +- 5% of the median dose ({medianEnergy: 1.1f} MeV) ')
-
-        if hasattr(self, 'zOut'):
-            print(
-                f'Mean Z position of output data is {np.mean(self.zOut): 3.1f} \u00B1 {np.std(self.zOut): 1.1f} (std)')
 
     def __DetectDataType(self):
         """
@@ -216,15 +201,28 @@ class ElectronPhaseSpace:
             self.OutputFile, Filetype = os.path.splitext(Filename)
             self.__ReadInTibarayData()
 
+        if self.weight is None:
+            self.weight = np.ones(len(self.x))
+
     def __ReadInTibarayData(self):
         """
         Read in data from tibaray, which had header:
 
         `x y z rxy Bx By Bz G t m q nmacro rmacro ID`
+
+        x[m] y[m] z[m] rxy[m] (positions in space)
+        Bx[v/c] By[v/c] Bz[v/c] (normalized velocity)
+        G [Lorentz factor]
+        t[time, s]
+        m[kg, mass of elementary particle of the macro particle]
+        q[Coulomb, charge of elementary particle of the macro particle]
+        nmacro[number of electrons in this macro particle]
+        rmacro[NA]
+        ID[Macro Particle ID Number]
         """
         warnings.warn('Read in of this file format is still under development')
         Data = np.loadtxt(self.Data, skiprows=1)
-        self.x = Data[:, 0] * 1e3  #mm to m
+        self.x = Data[:, 0] * 1e3  # mm to m
         self.y = Data[:, 1] * 1e3
         self.z = Data[:, 2] * 1e3
         Bx = Data[:, 4]
@@ -238,13 +236,14 @@ class ElectronPhaseSpace:
         rmacro = Data[:, 12]
         ID = Data[:, 13]
 
-        self.px = np.multiply(Bx, Gamma) * self.me_MeV
-        self.py = np.multiply(By, Gamma) * self.me_MeV
-        self.pz = np.multiply(Bz, Gamma) * self.me_MeV
+        self.px = np.multiply(Bx, Gamma) * self._me_MeV
+        self.py = np.multiply(By, Gamma) * self._me_MeV
+        self.pz = np.multiply(Bz, Gamma) * self._me_MeV
 
         Totm = np.sqrt((self.px ** 2 + self.py ** 2 + self.pz ** 2))
-        self.TOT_E = np.sqrt(Totm ** 2 + self.me_MeV ** 2)
-        Kin_E = np.subtract(self.TOT_E, self.me_MeV)
+        self.TOT_E = np.sqrt(Totm ** 2 + self._me_MeV ** 2)
+        Kin_E = np.subtract(self.TOT_E, self._me_MeV)
+        self.weight = nmacro
         self.E = Kin_E
 
     def __ReadInSLACData(self):
@@ -283,14 +282,16 @@ class ElectronPhaseSpace:
         self.x = Data[:, 0]
         self.y = Data[:, 1]
         self.z = Data[:, 2]
-        self.px = Data[:, 9] * self.me_MeV
-        self.py = Data[:, 10] * self.me_MeV
-        self.pz = Data[:, 11] * self.me_MeV
+        self.px = Data[:, 9] * self._me_MeV
+        self.py = Data[:, 10] * self._me_MeV
+        self.pz = Data[:, 11] * self._me_MeV
+        _macro_charge = Data[:, 6]
+        self.weight = _macro_charge / scipy.constants.elementary_charge
 
         # calculate energies
         Totm = np.sqrt((self.px ** 2 + self.py ** 2 + self.pz ** 2))
-        self.TOT_E = np.sqrt(Totm ** 2 + self.me_MeV ** 2)
-        Kin_E = np.subtract(self.TOT_E, self.me_MeV)
+        self.TOT_E = np.sqrt(Totm ** 2 + self._me_MeV ** 2)
+        Kin_E = np.subtract(self.TOT_E, self._me_MeV)
         self.E = Kin_E
 
         print('Read in of CST data succesful')
@@ -298,23 +299,23 @@ class ElectronPhaseSpace:
     def __ReadInTopasData(self):
         """
         Read in topas  data
-        assumption is that this in in cm and MeV
+        assumption is that this is in cm and MeV
         """
 
         PhaseSpace = tp.read_ntuple(self.Data)
         ParticleTypes = PhaseSpace['Particle Type (in PDG Format)']
         ParticleTypes = ParticleTypes.astype(int)
         ParticleDir = PhaseSpace['Flag to tell if Third Direction Cosine is Negative (1 means true)']
-        ParticleDir = ParticleDir.astype(int)
-        ParticleDirInd = ParticleDir == 1  # only want forward moving particles
+        # ParticleDir = ParticleDir.astype(int)
+        # ParticleDirInd = ParticleDir == 1  # only want forward moving particles
         if self.ParticleType == 'electrons':
             ParticleTypeInd = ParticleTypes == 11  # only want electrons
-            Ind = np.logical_and(ParticleDirInd, ParticleTypeInd)
+            Ind = ParticleTypeInd
         elif self.ParticleType == 'gamma':
             ParticleTypeInd = ParticleTypes == 22  # only want photons
-            Ind = np.logical_and(ParticleDirInd, ParticleTypeInd)
+            Ind = ParticleTypeInd
         else:
-            Ind = ParticleDirInd
+            raise TypeError(f'no read in for {self.ParticleType}')
 
         self.x = PhaseSpace['Position X [cm]'][Ind] * 1e1
         self.y = PhaseSpace['Position Y [cm]'][Ind] * 1e1
@@ -322,6 +323,7 @@ class ElectronPhaseSpace:
         self.DirCosineX = PhaseSpace['Direction Cosine X'][Ind]
         self.DirCosineY = PhaseSpace['Direction Cosine Y'][Ind]
         self.E = PhaseSpace['Energy [MeV]'][Ind]
+        self.weight = PhaseSpace['Weight'][Ind]
 
         # figure out the momentums:
         self.__CosinesToMom()
@@ -350,9 +352,9 @@ class ElectronPhaseSpace:
         as I have been doing.
         I'm also not totally sure that i'm calculating these correctly....
         """
-        self.vx = np.divide(self.px, (self.Gamma * self.me_MeV))
-        self.vy = np.divide(self.py, (self.Gamma * self.me_MeV))
-        self.vz = np.divide(self.pz, (self.Gamma * self.me_MeV))
+        self.vx = np.divide(self.px, (self.Gamma * self._me_MeV))
+        self.vy = np.divide(self.py, (self.Gamma * self._me_MeV))
+        self.vz = np.divide(self.pz, (self.Gamma * self._me_MeV))
 
     def __CosinesToMom(self):
         """
@@ -360,8 +362,8 @@ class ElectronPhaseSpace:
         """
         # first calculte total momentum from total energy:
         if self.ParticleType == 'electrons':
-            P = np.sqrt(self.E ** 2 + self.me_MeV ** 2)
-            self.TOT_E = np.sqrt(P ** 2 + self.me_MeV ** 2)
+            P = np.sqrt(self.E ** 2 + self._me_MeV ** 2)
+            self.TOT_E = np.sqrt(P ** 2 + self._me_MeV ** 2)
         elif self.ParticleType == 'gamma':
             # zero rest mass
             P = np.sqrt(self.E ** 2)
@@ -381,7 +383,7 @@ class ElectronPhaseSpace:
     def __ReadInNumpyData(self):
         """
         Read mnumpy array of the form
-        [x y z px py pz]
+        [x y z px py pz weight]
         """
         self.x = self.Data[:, 0]
         self.y = self.Data[:, 1]
@@ -389,69 +391,94 @@ class ElectronPhaseSpace:
         self.px = self.Data[:, 3]
         self.py = self.Data[:, 4]
         self.pz = self.Data[:, 5]
+        self.weight = self.Data[:, 6]
 
         # calculate energies
         Totm = np.sqrt((self.px ** 2 + self.py ** 2 + self.pz ** 2))
-        self.TOT_E = np.sqrt(Totm ** 2 + self.me_MeV ** 2)
-        Kin_E = np.subtract(self.TOT_E, self.me_MeV)
+        self.TOT_E = np.sqrt(Totm ** 2 + self._me_MeV ** 2)
+        Kin_E = np.subtract(self.TOT_E, self._me_MeV)
         self.E = Kin_E
 
+    def __weighted_median(self, data, weights):
+        """
+        calculate a weighted median
+        @author Jack Peterson (jack@tinybike.net)
+        credit: https://gist.github.com/tinybike/d9ff1dad515b66cc0d87
+
+        Args:
+          data (list or numpy.array): data
+          weights (list or numpy.array): weights
+        """
+        data, weights = np.array(data).squeeze(), np.array(weights).squeeze()
+        s_data, s_weights = map(np.array, zip(*sorted(zip(data, weights))))
+        midpoint = 0.5 * sum(s_weights)
+        if any(weights > midpoint):
+            w_median = (data[weights == np.max(weights)])[0]
+        else:
+            cs_weights = np.cumsum(s_weights)
+            idx = np.where(cs_weights <= midpoint)[0][-1]
+            if cs_weights[idx] == midpoint:
+                w_median = np.mean(s_data[idx:idx + 2])
+            else:
+                w_median = s_data[idx + 1]
+        return w_median
+
+    def __weighted_avg_and_std(self, values, weights):
+        """
+        credit: https://stackoverflow.com/questions/2413522/weighted-standard-deviation-in-numpy
+        Return the weighted average and standard deviation.
+
+        values, weights -- Numpy ndarrays with the same shape.
+        """
+        average = np.average(values, weights=weights)
+        # Fast and numerically precise:
+        variance = np.average((values - average) ** 2, weights=weights)
+        return (average, np.sqrt(variance))
+
+    def __weighted_quantile(self, values, quantiles, sample_weight=None):
+        """
+        credit: https://stackoverflow.com/questions/21844024/weighted-percentile-using-numpy
+
+        Very close to numpy.percentile, but supports weights.
+        NOTE: quantiles should be in [0, 1]!
+        :param values: numpy.array with data
+        :param quantiles: array-like with many quantiles needed
+        :param sample_weight: array-like of the same length as `array`
+        :param values_sorted: bool, if True, then will avoid sorting of
+            initial array
+        :param old_style: if True, will correct output to be consistent
+            with numpy.percentile.
+        :return: numpy.array with computed quantiles.
+        """
+        values = np.array(values)
+        quantiles = np.array(quantiles)
+        if sample_weight is None:
+            sample_weight = np.ones(len(values))
+        sample_weight = np.array(sample_weight)
+        assert np.all(quantiles >= 0) and np.all(quantiles <= 1), 'quantiles should be in [0, 1]'
+        sorter = np.argsort(values)
+        values = values[sorter]
+        sample_weight = sample_weight[sorter]
+        weighted_quantiles = np.cumsum(sample_weight) - 0.5 * sample_weight
+        weighted_quantiles /= np.sum(sample_weight)
+        return np.interp(quantiles, weighted_quantiles, values)
+
     def __AnalyseEnergyDistribution(self):
-        self.meanEnergy = np.mean(self.E)
-        self.medianEnergy = np.median(self.E)
-        self.EnergySpreadSTD = np.std(self.E)
-        q75, q25 = np.percentile(self.E, [75, 25])
+        self.meanEnergy, self.stdEnergy = self.__weighted_avg_and_std(self.E, self.weight)
+        self.medianEnergy = self.__weighted_median(self.E, self.weight)
+        self.EnergySpreadSTD = np.std(np.multiply(self.E, self.weight))
+        q75, q25 = self.__weighted_quantile(self.E, [0.25, 0.75], sample_weight=self.weight)
         self.EnergySpreadIQR = q75 - q25
-
-    def AssessDensityVersusR(self,Rvals = None):
-        """
-        Crude code to assess how many particles are in a certain radius
-
-        If ROI = None,  then all particles are assessed.
-        Otherwise, use ROI = [zval, radius] to only include particles that would be within radius r at distance z from
-        the read in location
-        """
-        if Rvals is None:
-            # pick a default
-            Rvals = np.linspace(0, 2, 21)
-
-        r = np.sqrt(self.x ** 2 + self.y ** 2)
-        numparticles = self.x.shape[0]
-        rad_prop = []
-
-        if self.verbose:
-            if self.ROI == None:
-                print(f'Assessing particle density versus R for all particles')
-            else:
-                print(f'Assessing particle density versus R for particles projected to be within a radius of'
-                      f' {self.ROI[1]} at a distance of {self.ROI[0]}')
-
-        for rcheck in Rvals:
-            if self.ROI == None:
-                Rind = r <= rcheck
-                rad_prop.append(np.count_nonzero(Rind) * 100 / numparticles)
-            else:
-                # apply the additional ROI filter by projecting x,y to the relevant z position
-                Xproj = np.multiply(self.ROI[0], np.divide(self.px, self.pz)) + self.x
-                Yproj = np.multiply(self.ROI[0], np.divide(self.py, self.pz)) + self.y
-                Rproj = np.sqrt(Xproj ** 2 + Yproj ** 2)
-                ROIind = Rproj <= self.ROI[1]
-
-                Rind = r <= rcheck
-                ind = np.multiply(ROIind, Rind)
-                rad_prop.append(np.count_nonzero(ind) * 100 / numparticles)
-
-        self.rad_prop = rad_prop
 
     def __CalculateTwissParameters(self):
         """
         Calculate the twiss parameters
         """
         # Calculate in X direction
-        self.x2 = np.mean(np.square(self.x))
+        self.x2 = np.average(np.square(self.x), weights=self.weight)
         self.xp = np.divide(self.px, self.pz) * 1e3
-        self.xp2 = np.mean(np.square(self.xp))
-        self.x_xp = np.mean(np.multiply(self.x, self.xp))
+        self.xp2 = np.average(np.square(self.xp), weights=self.weight)
+        self.x_xp = np.average(np.multiply(self.x, self.xp), weights=self.weight)
 
         self.twiss_epsilon = np.sqrt((self.x2 * self.xp2) - (self.x_xp ** 2)) * np.pi
         self.twiss_alpha = -self.x_xp / self.twiss_epsilon
@@ -463,8 +490,8 @@ class ElectronPhaseSpace:
         For the SLAC data, if we understand the units correctly, we should be able to recover the energy from the momentum....
         """
         Totm = np.sqrt((self.px ** 2 + self.py ** 2 + self.pz ** 2))
-        self.TOT_E = np.sqrt(Totm ** 2 + self.me_MeV ** 2)
-        Kin_E = np.subtract(self.TOT_E, self.me_MeV)
+        self.TOT_E = np.sqrt(Totm ** 2 + self._me_MeV ** 2)
+        Kin_E = np.subtract(self.TOT_E, self._me_MeV)
 
         E_error = max(self.E - Kin_E)
         if E_error > .01:
@@ -485,91 +512,6 @@ class ElectronPhaseSpace:
         self.TOT_P = np.sqrt(self.px ** 2 + self.py ** 2 + self.pz ** 2)
         self.Beta = np.divide(self.TOT_P, self.TOT_E)
         self.Gamma = 1 / np.sqrt(1 - np.square(self.Beta))
-
-    def GenerateCSTParticleImportFile(self, Zoffset=None):
-        """
-        Generate a phase space which can be directly imported into CST
-        For a constant emission model: generate a .pid ascii file
-        Below is the example from CST:
-
-        % Use always SI units.
-        % The momentum (mom) is equivalent to beta* gamma.
-        %
-        % Columns: pos_x  pos_y  pos_z  mom_x  mom_y  mom_z  mass  charge  current
-
-        1.0e-3   4.0e-3  -1.0e-3   1.0   2.0   1.0   9.11e-31  -1.6e-19   1.0e-6
-        2.0e-3   4.0e-3   1.0e-3   1.0   2.0   1.0   9.11e-31  -1.6e-19   1.0e-6
-        3.0e-3   2.0e-3   1.0e-3   1.0   2.0   2.0   9.11e-31  -1.6e-19   1.0e-6
-        4.0e-3   4.0e-3   5.0e-3   1.0   2.0   1.0   9.11e-31  -1.6e-19   2.0e-6
-        """
-
-        # Split the original file and extract the file name
-        NparticlesToWrite = np.size(self.x)  # use this to create a smaller PID flie for easier trouble shooting
-        WritefilePath = self.OutputDataLoc + '/' + self.OutputFile + '.pid'
-        # generate other information required by pid file:
-
-        Charge = np.ones(np.shape(self.x)) * constants.elementary_charge * -1
-        Mass = np.ones(np.shape(self.x)) * constants.electron_mass
-        Current = np.ones(np.shape(self.x)) * self.TotalCurrent / np.size(self.x)  # very crude approximation!!
-        x = self.x * 1e-3  ## convert to m
-        y = self.y * 1e-3
-        if Zoffset == None:
-            # Zoffset is an optional parameter to change the starting location of the particle beam (which
-            # assume propogates in the Z direction)
-            self.zOut = self.z * 1e-3
-        else:
-            self.zOut = (self.z + Zoffset) * 1e-3
-        px = self.px/self.me_MeV
-        py = self.py/self.me_MeV
-        pz = self.pz/self.me_MeV
-        # generate PID file
-        Data = [x[0:NparticlesToWrite], y[0:NparticlesToWrite], self.zOut[0:NparticlesToWrite],
-                px[0:NparticlesToWrite], py[0:NparticlesToWrite], pz[0:NparticlesToWrite],
-                Mass[0:NparticlesToWrite], Charge[0:NparticlesToWrite], Current[0:NparticlesToWrite]]
-
-        Data = np.transpose(Data)
-        np.savetxt(WritefilePath, Data, fmt='%01.3e', delimiter='      ')
-
-    def GenerateTopasImportFile(self, Zoffset=None):
-        """
-        Convert Phase space into format appropriate for topas.
-        You can read more about the required format
-        `Here <https://topas.readthedocs.io/en/latest/parameters/scoring/phasespace.html>`_
-
-        :param Zoffset: number to add to the Z position of each particle. To move it upstream, Zoffset should be negative.
-         No check is made for units, the user has to figure this out themselves! If Zoffset=None, the read in X value
-         will be used.
-        :type Zoffset: None or double
-        """
-        print('generating topas data file')
-        WritefilePath = self.OutputDataLoc + '/' + self.OutputFile + '_tpsImport.phsp'
-
-        # write the header file:
-        self.__GenerateTopasHeaderFile()
-
-        # generare the required data and put it all in an ndrray
-        self.__ConvertMomentumToVelocity()
-        DirCosX, DirCosY = self.__CalculateDirectionCosines()
-        Weight = np.ones(len(self.x))  # i think weight is scaled relative to particle type
-        ParticleType = 11 * np.ones(len(self.x))  # 11 is the particle ID for electrons
-        ThirdDirectionFlag = np.zeros(len(self.x))  # not really sure what this means.
-        FirstParticleFlag = np.ones(
-            len(self.x))  # don't actually know what this does but as we import a pure phase space
-        if Zoffset == None:
-            # Zoffset is an optional parameter to change the starting location of the particle beam (which
-            # assume propogates in the Z direction)
-            self.zOut = self.z
-        else:
-            self.zOut = self.z + Zoffset
-
-        # Nb: topas seems to require units of cm
-        Data = [self.x * 0.1, self.y * 0.1, self.zOut * 0.1, DirCosX, DirCosY, self.E, Weight,
-                ParticleType, ThirdDirectionFlag, FirstParticleFlag]
-
-        # write the data to a text file
-        Data = np.transpose(Data)
-        FormatSpec = ['%11.5f', '%11.5f', '%11.5f', '%11.5f', '%11.5f', '%11.5f', '%2d', '%2d', '%2d', '%2d']
-        np.savetxt(WritefilePath, Data, fmt=FormatSpec, delimiter='      ')
 
     def __CalculateDirectionCosines(self):
         """
@@ -629,34 +571,127 @@ class ElectronPhaseSpace:
 
         f.close
 
-    def PlotPhaseSpaceX(self):
-        plt.figure()
-        plt.scatter(self.x, self.xp, s=1, marker='.')
-        plt.xlabel('X [mm]')
-        plt.ylabel("X' [mrad]")
+    # public methods
 
-        # # add in the phase elipse
+    def GenerateCSTParticleImportFile(self, Zoffset=None):
+        """
+        Generate a phase space which can be directly imported into CST
+        For a constant emission model: generate a .pid ascii file
+        Below is the example from CST:
+
+        % Use always SI units.
+        % The momentum (mom) is equivalent to beta* gamma.
+        %
+        % Columns: pos_x  pos_y  pos_z  mom_x  mom_y  mom_z  mass  charge  current
+
+        1.0e-3   4.0e-3  -1.0e-3   1.0   2.0   1.0   9.11e-31  -1.6e-19   1.0e-6
+        2.0e-3   4.0e-3   1.0e-3   1.0   2.0   1.0   9.11e-31  -1.6e-19   1.0e-6
+        3.0e-3   2.0e-3   1.0e-3   1.0   2.0   2.0   9.11e-31  -1.6e-19   1.0e-6
+        4.0e-3   4.0e-3   5.0e-3   1.0   2.0   1.0   9.11e-31  -1.6e-19   2.0e-6
+        """
+        warnings.warn('I havent tested this function for a very long time, so please verify that it works..')
+        # Split the original file and extract the file name
+        NparticlesToWrite = np.size(self.x)  # use this to create a smaller PID flie for easier trouble shooting
+        WritefilePath = self.OutputDataLoc + '/' + self.OutputFile + '.pid'
+        # generate other information required by pid file:
+
+        Charge = self.weight * constants.elementary_charge * -1
+        Mass = self.weight * constants.electron_mass
+        Current = np.ones(np.shape(self.x)) * self.TotalCurrent / np.size(self.x)  # very crude approximation!!
+        x = self.x * 1e-3  ## convert to m
+        y = self.y * 1e-3
+        if Zoffset == None:
+            # Zoffset is an optional parameter to change the starting location of the particle beam (which
+            # assume propogates in the Z direction)
+            self.zOut = self.z * 1e-3
+        else:
+            self.zOut = (self.z + Zoffset) * 1e-3
+        px = self.px / self._me_MeV
+        py = self.py / self._me_MeV
+        pz = self.pz / self._me_MeV
+        # generate PID file
+        Data = [x[0:NparticlesToWrite], y[0:NparticlesToWrite], self.zOut[0:NparticlesToWrite],
+                px[0:NparticlesToWrite], py[0:NparticlesToWrite], pz[0:NparticlesToWrite],
+                Mass[0:NparticlesToWrite], Charge[0:NparticlesToWrite], Current[0:NparticlesToWrite]]
+
+        Data = np.transpose(Data)
+        np.savetxt(WritefilePath, Data, fmt='%01.3e', delimiter='      ')
+
+    def GenerateTopasImportFile(self, Zoffset=None):
+        """
+        Convert Phase space into format appropriate for topas.
+        You can read more about the required format
+        `Here <https://topas.readthedocs.io/en/latest/parameters/scoring/phasespace.html>`_
+
+        :param Zoffset: number to add to the Z position of each particle. To move it upstream, Zoffset should be negative.
+         No check is made for units, the user has to figure this out themselves! If Zoffset=None, the read in X value
+         will be used.
+        :type Zoffset: None or double
+        """
+        print('generating topas data file')
+        WritefilePath = self.OutputDataLoc + '/' + self.OutputFile + '_tpsImport.phsp'
+
+        # write the header file:
+        self.__GenerateTopasHeaderFile()
+
+        # generare the required data and put it all in an ndrray
+        self.__ConvertMomentumToVelocity()
+        DirCosX, DirCosY = self.__CalculateDirectionCosines()
+        Weight = self.weight  # i think weight is scaled relative to particle type
+        # Weight = np.ones(len(self.x))  # i think weight is scaled relative to particle type
+        ParticleType = 11 * np.ones(len(self.x))  # 11 is the particle ID for electrons
+        ThirdDirectionFlag = np.zeros(len(self.x))  # not really sure what this means.
+        FirstParticleFlag = np.ones(
+            len(self.x))  # don't actually know what this does but as we import a pure phase space
+        if Zoffset == None:
+            # Zoffset is an optional parameter to change the starting location of the particle beam (which
+            # assume propogates in the Z direction)
+            self.zOut = self.z
+        else:
+            self.zOut = self.z + Zoffset
+
+        # Nb: topas seems to require units of cm
+        Data = [self.x * 0.1, self.y * 0.1, self.zOut * 0.1, DirCosX, DirCosY, self.E, Weight,
+                ParticleType, ThirdDirectionFlag, FirstParticleFlag]
+
+        # write the data to a text file
+        Data = np.transpose(Data)
+        FormatSpec = ['%11.5f', '%11.5f', '%11.5f', '%11.5f', '%11.5f', '%11.5f', '%11.5f', '%2d', '%2d', '%2d']
+        np.savetxt(WritefilePath, Data, fmt=FormatSpec, delimiter='      ')
+        print('success')
+
+    def PlotPhaseSpaceX(self):
+
+        if self.weight.max() > 1:
+            warnings.warn('this plot does not take into account particle weights')
+        plt.figure()
+
+        #plot phase elipse
         xq = np.linspace(min(self.x), max(self.x), 1000)
         xpq = np.linspace(min(self.xp), max(self.xp), 1000)
         [ElipseGridx, ElipseGridy] = np.meshgrid(xq, xpq)
-        EmittanceGrid = (self.gamma * np.square(ElipseGridx)) + \
-                        (2 * self.alpha * np.multiply(ElipseGridx, ElipseGridy)) + \
-                        (self.beta * np.square(ElipseGridy))
-        tol = .01 * self.epsilon
-        Elipse = (EmittanceGrid >= self.epsilon - tol) & (EmittanceGrid <= self.epsilon + tol)
+        EmittanceGrid = (self.twiss_gamma * np.square(ElipseGridx)) + \
+                        (2 * self.twiss_alpha * np.multiply(ElipseGridx, ElipseGridy)) + \
+                        (self.twiss_beta * np.square(ElipseGridy))
+        tol = .01 * self.twiss_epsilon
+        Elipse = (EmittanceGrid >= self.twiss_epsilon - tol) & (EmittanceGrid <= self.twiss_epsilon + tol)
         ElipseIndex = np.where(Elipse == True)
         elipseX = ElipseGridx[ElipseIndex]
         elipseY = ElipseGridy[ElipseIndex]
-
         plt.scatter(elipseX, elipseY, s=1, c='r')
-        # plt.ylim([min(elipseY)*2,max(elipseY)*2])
+        xmin, xmax, ymin, ymax = plt.axis()
 
+        plt.scatter(self.x, self.xp, s=1, marker='.')
+        plt.xlabel('X [mm]')
+        plt.ylabel("X' [mrad]")
+        plt.ylim([ymin, ymax])
+        plt.xlim([xmin, xmax])
         TitleString = "\u03C0\u03B5: %1.1f mm mrad, \u03B1: %1.1f, \u03B2: %1.1f, \u03B3: %1.1f" % \
-                      (self.epsilon, self.alpha, self.beta, self.gamma)
+                      (self.twiss_epsilon, self.twiss_alpha, self.twiss_beta, self.twiss_gamma)
         plt.title(TitleString)
-        plt.ylim([-5, 5])
-        plt.xlim([-1.5, 1.5])
+
         plt.grid(True)
+        plt.show()
 
     def PlotEnergyHistogram(self):
 
@@ -664,7 +699,7 @@ class ElectronPhaseSpace:
             test = self.Eaxs
         except AttributeError:
             self.Efig, self.Eaxs = plt.subplots()
-        n, bins, patches = self.Eaxs.hist(self.E, bins=1000)
+        n, bins, patches = self.Eaxs.hist(self.E, bins=1000, weights=self.weight)
         # self.fig.set_size_inches(10, 5)
         self.Eaxs.set_xlabel('Energy [Mev]', fontsize=self.FigureSpecs.LabelFontSize)
         self.Eaxs.set_ylabel('N counts', fontsize=self.FigureSpecs.LabelFontSize)
@@ -676,24 +711,7 @@ class ElectronPhaseSpace:
         # self.Eaxs.set_xlim([0, 10.5])
         plt.tight_layout()
         plt.show()
-        # plt.tick_params(axis='both', which='minor', labelsize=14)
-        # perform a gaussian fit:
-
-        # firstly get just the main part of the spectrum
-        # EminFit = 10.2
-        # EmaxFit = 10.5
-        # Eforfit = self.E[(self.E > EminFit) & (self.E < EmaxFit)]  # bit of a hack
-        # # Plot the PDF.
-        # mu, std = norm.fit(Eforfit)
-        # x = np.linspace(EminFit*.5, EmaxFit+.5, 1000)
-        # np.seterr(under='ignore')
-        # p = norm.pdf(x, mu, std)
-        # p = p/p.max()  ## normalise to 1
-        # plt.plot(x, p*n.max(), ':', linewidth=2)
-        # plot_title = "Fit results: mu = %.2f,  std = %.2f" % (mu, std)
-
         self.Eaxs.set_title(plot_title, fontsize=self.FigureSpecs.TitleFontSize)
-        np.seterr(under='raise')
 
     def PlotParticlePositions(self):
 
@@ -704,10 +722,25 @@ class ElectronPhaseSpace:
             self.fig.set_size_inches(10, 5)
 
         if self._weight_position_plot:
+            _kde_data_grid = 150 ** 2
+            print('generating weighted scatter plot...')
+
             xy = np.vstack([self.x, self.y])
-            z = gaussian_kde(xy)(xy)
+            k = gaussian_kde(xy, weights=self.weight)
+            _end_time = perf_counter()
+
+            if self.x.shape[0] > _kde_data_grid:
+                down_sample_factor = np.round(self.x.shape[0] / _kde_data_grid)
+                print(f'down sampling scatter plot data by factor of {down_sample_factor}')
+                # in this case we can downsample the grid...
+                rng = np.random.default_rng()
+                rng.shuffle(xy)  # operates in place for some confusing reason
+                xy = rng.choice(xy, np.int(self.x.shape[0] / down_sample_factor), replace=False, axis=1, shuffle=False)
+            z = k(xy)
+
+
             z = z / max(z)
-            SP = self.axs[0].scatter(self.x, self.y, c=z, s=1)
+            SP = self.axs[0].scatter(xy[0], xy[1], c=z, s=1)
             self.axs[0].set_aspect(1)
             # self.fig.colorbar(SP,ax=self.axs[0])
             self.axs[0].set_title('Particle Positions', fontsize=self.FigureSpecs.TitleFontSize)
@@ -719,11 +752,11 @@ class ElectronPhaseSpace:
             plt.tight_layout()
         else:
             self.axs[0].set_title('Particle Positions', fontsize=self.FigureSpecs.TitleFontSize)
-            self.axs[0].scatter(self.x, self.y, s=1)
+            self.axs[0].scatter(self.x, self.y, s=1, c=self.weight)
             self.axs[0].set_xlabel('X position [mm]', fontsize=self.FigureSpecs.LabelFontSize)
             self.axs[0].set_ylabel('Y position [mm]', fontsize=self.FigureSpecs.LabelFontSize)
 
-        self.axs[1].hist(self.x, bins=100)
+        self.axs[1].hist(self.x, bins=100, weights=self.weight)
         self.axs[1].set_xlabel('X position [mm]', fontsize=self.FigureSpecs.LabelFontSize)
         self.axs[1].set_ylabel('counts', fontsize=self.FigureSpecs.LabelFontSize)
         plt.tight_layout()
@@ -782,4 +815,74 @@ class ElectronPhaseSpace:
         self.__CalculateTwissParameters()  # at the moment just caclculates transverse phse space in X.
         self.__AnalyseEnergyDistribution()
 
+    def AssessDensityVersusR(self, Rvals=None):
+        """
+        Crude code to assess how many particles are in a certain radius
 
+        If ROI = None,  then all particles are assessed.
+        Otherwise, use ROI = [zval, radius] to only include particles that would be within radius r at distance z from
+        the read in location
+        """
+
+        if self.weight.max() > 1:
+            warnings.warn('The AssessDensityVersusR function has not been updated for weighted particles')
+        if Rvals is None:
+            # pick a default
+            Rvals = np.linspace(0, 2, 21)
+
+        r = np.sqrt(self.x ** 2 + self.y ** 2)
+        numparticles = self.x.shape[0]
+        rad_prop = []
+
+        if self.verbose:
+            if self.ROI == None:
+                print(f'Assessing particle density versus R for all particles')
+            else:
+                print(f'Assessing particle density versus R for particles projected to be within a radius of'
+                      f' {self.ROI[1]} at a distance of {self.ROI[0]}')
+
+        for rcheck in Rvals:
+            if self.ROI == None:
+                Rind = r <= rcheck
+                rad_prop.append(np.count_nonzero(Rind) * 100 / numparticles)
+            else:
+                # apply the additional ROI filter by projecting x,y to the relevant z position
+                Xproj = np.multiply(self.ROI[0], np.divide(self.px, self.pz)) + self.x
+                Yproj = np.multiply(self.ROI[0], np.divide(self.py, self.pz)) + self.y
+                Rproj = np.sqrt(Xproj ** 2 + Yproj ** 2)
+                ROIind = Rproj <= self.ROI[1]
+
+                Rind = r <= rcheck
+                ind = np.multiply(ROIind, Rind)
+                rad_prop.append(np.count_nonzero(ind) * 100 / numparticles)
+
+        self.rad_prop = rad_prop
+
+    def PrintData(self):
+        """
+        can be used to print info to the termainl
+        """
+        if (self.DataType == 'topas') or (self.DataType == 'SLAC') or (self.DataType == 'CST'):
+            Filepath, filename = os.path.split(self.Data)
+            print(f'\nFor file: {filename}')
+        print(
+            f'\u03C0\u03B5: {self.twiss_epsilon: 1.1f} mm mrad, \u03B1: {self.twiss_alpha: 1.1f}, \u0392: {self.twiss_beta: 1.1f}, '
+            f'\u03B3: {self.twiss_gamma: 1.1f}')
+        print(f'Median energy: {self.medianEnergy: 1.1f} MeV \u00B1 {self.EnergySpreadIQR} (IQR) ')
+        print(f'Mean energy: {self.meanEnergy: 1.1f} MeV \u00B1 {self.stdEnergy} (std) ')
+        _mean_z, _std_z = self.__weighted_avg_and_std(self.z, self.weight)
+        print(f'Mean Z position of input data is {_mean_z: 3.1f} mm \u00B1 {_std_z: 1.1f} (std)')
+        medianEnergy = self.medianEnergy
+        CutOff = .05
+        ind = np.logical_and(self.E > (medianEnergy - (.05 * medianEnergy)),
+                             self.E < (medianEnergy + (.05 * medianEnergy)))
+        weighted_ind = np.multiply(ind, self.weight)
+        weighted_percent = np.sum(weighted_ind) * 100 / np.sum(self.weight)
+
+        print(
+            f'{weighted_percent:1.1f} % of particles are within \u00B1 5% of the median dose ({medianEnergy: 1.1f} MeV) ')
+
+        if hasattr(self, 'zOut'):
+            _mean_zOut, _std_zOut = self.__weighted_avg_and_std(self.zOut, self.weight)
+            print(
+                f'Mean Z position of output data is {_mean_zOut: 3.1f} \u00B1 {_std_zOut: 1.1f} (std)')
