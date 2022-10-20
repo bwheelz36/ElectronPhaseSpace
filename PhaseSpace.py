@@ -229,7 +229,7 @@ class ElectronPhaseSpace:
         By = Data[:, 5]
         Bz = Data[:, 6]
         Gamma = Data[:, 7]
-        t = Data[:, 8]
+        self.t = Data[:, 8]
         m = Data[:, 9]
         q = Data[:, 10]
         nmacro = Data[:, 11]
@@ -816,6 +816,51 @@ class ElectronPhaseSpace:
 
         # update the info on particle distribution
         self.__CalculateBetaAndGamma()
+        self.__CalculateTwissParameters()  # at the moment just caclculates transverse phse space in X.
+        self.__AnalyseEnergyDistribution()
+
+    def Plot_nParticles_v_time(self):
+        """
+        basic plot of number of particles versus time; useful for quickly seperating out different bunches
+        of electrons such that you can apply the 'filter_by_time' method
+        """
+        if not hasattr(self, 't'):
+            warnings.warn('cant plot time as it hasnt been read in')
+            return
+
+        plt.figure()
+        plt.hist(self.t, 100)
+        plt.xlabel('time [AU]')
+        plt.ylabel('N particles')
+        plt.tight_layout()
+
+    def filter_by_time(self, t_start, t_finish):
+        """
+        remove all particles outside of t_start and t_finish. times EQUAL to t_start and t_finish are kept.
+        t will be in whatever units it was read in as; use Plot_nParticles_v_time
+        to visualise your data
+        """
+        if not hasattr(self, 't'):
+            warnings.warn('cant plot time as it hasnt been read in')
+            return
+        ind = np.logical_and(self.t >= t_start, self.t <= t_finish)
+        print(f'removing {np.count_nonzero(np.logical_not(ind)) * 100 /ind.shape[0]: 1.1f}% of particles')
+        print(f'new phase space will contain {np.count_nonzero(ind)} particles')
+        self.x = self.x[ind]
+        self.y = self.y[ind]
+        self.z = self.z[ind]
+        self.px = self.px[ind]
+        self.py = self.py[ind]
+        self.pz = self.pz[ind]
+        self.E = self.E[ind]
+        self.t = self.t[ind]
+        self.TOT_E = self.TOT_E[ind]
+        self.TOT_P = self.TOT_P[ind]
+        self.weight = self.weight[ind]
+
+        print('updating all metrics based on new phase space')
+        self.__CalculateBetaAndGamma()
+        self.__ConvertMomentumToVelocity()
         self.__CalculateTwissParameters()  # at the moment just caclculates transverse phse space in X.
         self.__AnalyseEnergyDistribution()
 
