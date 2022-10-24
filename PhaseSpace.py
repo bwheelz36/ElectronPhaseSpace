@@ -93,7 +93,7 @@ class ElectronPhaseSpace:
         PS.PlotPhaseSpaceX()
     """
 
-    def __init__(self, Data, verbose=False, weight_position_plot=False):
+    def __init__(self, Data, verbose=False, weight_position_plot=False, switch_zx_hack=False, position_cut=None):
         """
         Data can be one of four things:
 
@@ -114,10 +114,13 @@ class ElectronPhaseSpace:
         self._me_MeV = 0.511  # electron mass in MeV
         self._c = 2.998e8  # speed of light in m/s
         self.weight = None  # relative weight of each particle; overwritten with ones if not set during read in
+        self.t = None
         self.verbose = verbose
         self._weight_position_plot = weight_position_plot  # weights plots by density. Looks better but is slow.
         self.FigureSpecs = FigureSpecs()
         self.ROI = None  # [700, 5]
+        self._switch_zx_hack = switch_zx_hack
+        self._position_cut = position_cut
         '''
         '^^ this is used when asessing number of particles in a certain radius.
         If the particle is projected to fall within the ROI at ROI[0]=z and ROI[1] =r, it is counted.
@@ -131,6 +134,34 @@ class ElectronPhaseSpace:
         # this function will probably require some updates to work with different data formats
         self.__DetectDataType()
         self.__ReadInData()
+        if self._switch_zx_hack:
+            x_temp = self.x
+            z_temp = self.z
+            px_temp = self.px
+            pz_temp = self.pz
+            self.x = z_temp - np.median(z_temp)
+            self.z = x_temp
+            self.px = pz_temp
+            self.pz = px_temp
+        if self._position_cut:
+            cut_off_ind = np.logical_and(np.abs(self.x) <= self._position_cut, np.abs(self.y) <= self._position_cut)
+            weighted_particles_included = np.sum(self.weight[cut_off_ind])
+            weighted_particles_not = np.sum(self.weight[np.logical_not(cut_off_ind)])
+
+            print(f'removing {weighted_particles_not * 100 / weighted_particles_included: 1.1f}% of particles')
+            if np.max(self.weight) > 1:
+                print('^ this is adjsuted for particle weights')
+            self.x = self.x[cut_off_ind]
+            self.y = self.y[cut_off_ind]
+            self.z = self.z[cut_off_ind]
+            self.px = self.px[cut_off_ind]
+            self.py = self.py[cut_off_ind]
+            self.pz = self.pz[cut_off_ind]
+            self.E = self.E[cut_off_ind]
+            self.t = self.t[cut_off_ind]
+            self.TOT_E = self.TOT_E[cut_off_ind]
+            self.TOT_P = self.TOT_P[cut_off_ind]
+            self.weight = self.weight[cut_off_ind]
 
         # calculations:
         self.__CalculateBetaAndGamma()
@@ -203,6 +234,8 @@ class ElectronPhaseSpace:
 
         if self.weight is None:
             self.weight = np.ones(len(self.x))
+        if self.t is None:
+            self.t = np.ones(len(self.x))
 
     def __ReadInTibarayData(self):
         """
@@ -225,6 +258,7 @@ class ElectronPhaseSpace:
         self.x = Data[:, 0] * 1e3  # mm to m
         self.y = Data[:, 1] * 1e3
         self.z = Data[:, 2] * 1e3
+
         Bx = Data[:, 4]
         By = Data[:, 5]
         Bz = Data[:, 6]
@@ -239,6 +273,7 @@ class ElectronPhaseSpace:
         self.px = np.multiply(Bx, Gamma) * self._me_MeV
         self.py = np.multiply(By, Gamma) * self._me_MeV
         self.pz = np.multiply(Bz, Gamma) * self._me_MeV
+
 
         Totm = np.sqrt((self.px ** 2 + self.py ** 2 + self.pz ** 2))
         self.TOT_E = np.sqrt(Totm ** 2 + self._me_MeV ** 2)
@@ -379,6 +414,8 @@ class ElectronPhaseSpace:
                 'sometimes it may be indicative of a serious error...')
             temp[temp < 0] = 0
         self.pz = np.sqrt(temp)
+
+        self.TOT_P = np.sqrt(self.px ** 2 + self.py ** 2 + self.pz ** 2)
 
     def __ReadInNumpyData(self):
         """
@@ -833,6 +870,7 @@ class ElectronPhaseSpace:
         plt.xlabel('time [AU]')
         plt.ylabel('N particles')
         plt.tight_layout()
+        plt.show()
 
     def filter_by_time(self, t_start, t_finish):
         """
@@ -914,6 +952,7 @@ class ElectronPhaseSpace:
         if (self.DataType == 'topas') or (self.DataType == 'SLAC') or (self.DataType == 'CST'):
             Filepath, filename = os.path.split(self.Data)
             print(f'\nFor file: {filename}')
+        print(f'there are {self.x.shape[0]} particles in this phase space')
         print(
             f'\u03C0\u03B5: {self.twiss_epsilon: 1.1f} mm mrad, \u03B1: {self.twiss_alpha: 1.1f}, \u0392: {self.twiss_beta: 1.1f}, '
             f'\u03B3: {self.twiss_gamma: 1.1f}')
