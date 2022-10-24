@@ -763,7 +763,7 @@ class ElectronPhaseSpace:
             self.fig.set_size_inches(10, 5)
 
         if self._weight_position_plot:
-            _kde_data_grid = 150 ** 2
+            _kde_data_grid = 250 ** 2
             print('generating weighted scatter plot...')
 
             xy = np.vstack([self.x, self.y])
@@ -772,7 +772,7 @@ class ElectronPhaseSpace:
 
             if self.x.shape[0] > _kde_data_grid:
                 down_sample_factor = np.round(self.x.shape[0] / _kde_data_grid)
-                print(f'down sampling scatter plot data by factor of {down_sample_factor}')
+                warnings.warn(f'down sampling scatter plot data by factor of {down_sample_factor}, this seems to switch data direction...')
                 # in this case we can downsample the grid...
                 rng = np.random.default_rng()
                 rng.shuffle(xy)  # operates in place for some confusing reason
@@ -785,8 +785,9 @@ class ElectronPhaseSpace:
             self.axs[0].set_aspect(1)
             # self.fig.colorbar(SP,ax=self.axs[0])
             self.axs[0].set_title('Particle Positions', fontsize=self.FigureSpecs.TitleFontSize)
-            self.axs[0].set_xlim([-2, 2])
-            self.axs[0].set_ylim([-2, 2])
+            if self._position_cut:
+                self.axs[0].set_xlim([-self._position_cut, self._position_cut])
+                self.axs[0].set_ylim([-self._position_cut, self._position_cut])
             self.axs[0].set_xlabel('X position [mm]', fontsize=self.FigureSpecs.LabelFontSize)
             self.axs[0].set_ylabel('Y position [mm]', fontsize=self.FigureSpecs.LabelFontSize)
             plt.show()
