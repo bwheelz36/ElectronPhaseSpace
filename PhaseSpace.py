@@ -362,7 +362,7 @@ class ElectronPhaseSpace:
         """
         # first calculte total momentum from total energy:
         if self.ParticleType == 'electrons':
-            P = np.sqrt(self.E ** 2 + self._me_MeV ** 2)
+            P = np.sqrt((self.E + self._me_MeV) ** 2 - self._me_MeV ** 2)
             self.TOT_E = np.sqrt(P ** 2 + self._me_MeV ** 2)
         elif self.ParticleType == 'gamma':
             # zero rest mass
