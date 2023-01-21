@@ -1,5 +1,7 @@
 # Electron Phase Space
 
+> :warning: this code has been replaced by the more general purpose and well writen [ParticlePhaseSpace](https://github.com/bwheelz36/ParticlePhaseSpace); please use that instead! 
+
 The purpose of this code is to provide a tool to read electron phase spaces in python, perform some basic analysis, and - if needed, convert them to an output format appropriate to read into either CST or topas.
 
 Data can be one of four formats:
